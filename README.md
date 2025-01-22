@@ -2,7 +2,42 @@
 
 This plugin is a middleware for Traefik that can be used to detect and block malicious requests which base on the [Safeline](https://waf.chaitin.com/) engine.
 
-## Usage
+## Safeline Prepare
+The detection engine of the community version of SafeLine provides services by default via Unix socket. We need to modify it to use TCP, so it can be called by the t1k plugin.
+
+1.Navigate to the configuration directory of the SafeLine detection engine:
+```shell
+cd /data/safeline/resources/detector/
+```
+2.Open the `detector.yml` file in a text editor. Modify the bind configuration from Unix socket to TCP by adding the following settings:
+```yaml
+bind_addr: 0.0.0.0
+listen_port: 8000
+```
+These configuration values will override the default settings in the container, making the SafeLine engine listen on port 8000.
+
+3.Next, map the container’s port 8000 to the host machine. First, navigate to the SafeLine installation directory:
+```shell
+cd /data/safeline
+```
+
+4.Open the compose.yaml file in a text editor and add the ports field to the detector container to expose port 8000:
+```yaml
+...
+detect:
+  ports:
+    - 8000:8000
+...
+```
+
+5.Save the changes and restart SafeLine with the following commands:
+```shell
+docker-compose down
+docker-compose up -d
+```
+This will apply the changes and activate the new configuration.
+
+## Plugin Usage
 
 For a plugin to be active for a given Traefik instance, it must be declared in the static configuration.
 
@@ -58,5 +93,5 @@ http:
     chaitin:
       plugin:
         safeline:
-          addr: safeline-detector.safeline:8000
+          addr: safeline-detector.safeline:8000 # Safeline detection engine address
 ```
