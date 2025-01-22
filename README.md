@@ -3,7 +3,7 @@
 This plugin is a middleware for Traefik that can be used to detect and block malicious requests which base on the [Safeline](https://waf.chaitin.com/) engine.
 
 ## Safeline Prepare
-The detection engine of the community version of SafeLine provides services by default via Unix socket. We need to modify it to use TCP, so it can be called by the t1k plugin.
+The detection engine of the SafeLine provides services by default via Unix socket. We need to modify it to use TCP, so it can be called by the t1k plugin.
 
 1.Navigate to the configuration directory of the SafeLine detection engine:
 ```shell
