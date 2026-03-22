@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	t1k "github.com/chaitin/t1k-go"
@@ -18,6 +20,9 @@ type Config struct {
 	// Addr is the address for the detector
 	Addr     string `yaml:"addr"`
 	PoolSize int    `yaml:"pool_size"`
+	// IPHeader is the HTTP header to extract the real client IP from (e.g. "X-Forwarded-For", "CF-Connecting-IP").
+	// If empty, the socket IP (RemoteAddr) is used.
+	IPHeader string `yaml:"ip_header"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -66,6 +71,24 @@ func (s *Safeline) initServer() error {
 	return nil
 }
 
+// extractClientIP extracts the real client IP from the configured header.
+// For X-Forwarded-For, it takes the leftmost (first) IP which is the original client.
+func (s *Safeline) extractClientIP(req *http.Request) string {
+	if s.config.IPHeader == "" {
+		return ""
+	}
+	value := req.Header.Get(s.config.IPHeader)
+	if value == "" {
+		return ""
+	}
+	// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+	// The leftmost is the original client IP.
+	if idx := strings.IndexByte(value, ','); idx != -1 {
+		value = value[:idx]
+	}
+	return strings.TrimSpace(value)
+}
+
 func (s *Safeline) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -76,6 +99,14 @@ func (s *Safeline) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		s.logger.Printf("error in initServer: %s", err)
 		s.next.ServeHTTP(rw, req)
 		return
+	}
+	// Override RemoteAddr with real client IP from header if configured
+	if clientIP := s.extractClientIP(req); clientIP != "" {
+		_, port, _ := net.SplitHostPort(req.RemoteAddr)
+		if port == "" {
+			port = "0"
+		}
+		req.RemoteAddr = net.JoinHostPort(clientIP, port)
 	}
 	rw.Header().Set("X-Chaitin-waf", "safeline")
 	result, err := s.server.DetectHttpRequest(req)
