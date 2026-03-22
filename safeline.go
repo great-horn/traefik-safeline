@@ -13,16 +13,11 @@ import (
 	t1k "github.com/chaitin/t1k-go"
 )
 
-// Package example a example plugin.
-
 // Config the plugin configuration.
 type Config struct {
 	// Addr is the address for the detector
 	Addr     string `yaml:"addr"`
 	PoolSize int    `yaml:"pool_size"`
-	// IPHeader is the HTTP header to extract the real client IP from (e.g. "X-Forwarded-For", "CF-Connecting-IP").
-	// If empty, the socket IP (RemoteAddr) is used.
-	IPHeader string `yaml:"ip_header"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -71,22 +66,25 @@ func (s *Safeline) initServer() error {
 	return nil
 }
 
-// extractClientIP extracts the real client IP from the configured header.
-// For X-Forwarded-For, it takes the leftmost (first) IP which is the original client.
-func (s *Safeline) extractClientIP(req *http.Request) string {
-	if s.config.IPHeader == "" {
-		return ""
+// extractClientIP extracts the real client IP from standard proxy headers.
+// Checks X-Forwarded-For first (CDN/reverse proxy), then X-Real-Ip, then CF-Connecting-IP.
+// For X-Forwarded-For with multiple IPs, the leftmost (original client) is used.
+func extractClientIP(req *http.Request) string {
+	for _, header := range []string{"X-Forwarded-For", "X-Real-Ip", "CF-Connecting-IP"} {
+		value := req.Header.Get(header)
+		if value == "" {
+			continue
+		}
+		// X-Forwarded-For can contain "client, proxy1, proxy2"
+		if idx := strings.IndexByte(value, ','); idx != -1 {
+			value = value[:idx]
+		}
+		ip := strings.TrimSpace(value)
+		if ip != "" {
+			return ip
+		}
 	}
-	value := req.Header.Get(s.config.IPHeader)
-	if value == "" {
-		return ""
-	}
-	// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-	// The leftmost is the original client IP.
-	if idx := strings.IndexByte(value, ','); idx != -1 {
-		value = value[:idx]
-	}
-	return strings.TrimSpace(value)
+	return ""
 }
 
 func (s *Safeline) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -100,8 +98,8 @@ func (s *Safeline) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		s.next.ServeHTTP(rw, req)
 		return
 	}
-	// Override RemoteAddr with real client IP from header if configured
-	if clientIP := s.extractClientIP(req); clientIP != "" {
+	// Override RemoteAddr with real client IP from proxy headers
+	if clientIP := extractClientIP(req); clientIP != "" {
 		_, port, _ := net.SplitHostPort(req.RemoteAddr)
 		if port == "" {
 			port = "0"
@@ -125,6 +123,4 @@ func (s *Safeline) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	s.next.ServeHTTP(rw, req)
-	//rw.WriteHeader(http.StatusForbidden)
-	//_, _ = rw.Write([]byte("Inject by safeline\n"))
 }
